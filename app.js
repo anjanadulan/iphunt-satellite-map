@@ -64,7 +64,7 @@ function initMap() {
   map.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-right');
 
   // Load additional layers once style has loaded
-  map.on('style.load', () => {
+  map.on('load', () => {
     // 1. Add Esri Satellite Raster Source
     map.addSource('esri-satellite', {
       type: 'raster',
