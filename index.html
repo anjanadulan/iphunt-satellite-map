@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Orbital IP Tracker &amp; Google Satellite Map</title>
+  
+  <!-- Google Fonts - Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  
+  <!-- Application CSS -->
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- Fullscreen Google Map Container -->
+  <div id="map"></div>
+
+  <!-- Glassmorphic Dashboard Panel -->
+  <main class="dashboard-panel">
+    <!-- Header -->
+    <header class="panel-header">
+      <div class="logo-wrapper">
+        <svg xmlns="http://www.w3.org/2000/svg" class="logo-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"></circle>
+          <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"></path>
+          <path d="M2 12h20"></path>
+        </svg>
+        <div class="logo-text">
+          <h1>ORBITAL</h1>
+          <span>IP SATELLITE MAP</span>
+        </div>
+      </div>
+      <!-- API Key Settings Cog -->
+      <button type="button" id="settings-btn" class="settings-btn" title="Google Maps API Key Settings">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.1a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path>
+          <circle cx="12" cy="12" r="3"></circle>
+        </svg>
+      </button>
+    </header>
+
+    <!-- Search Section -->
+    <section class="search-section">
+      <form id="search-form" class="search-form">
+        <div class="input-container">
+          <svg xmlns="http://www.w3.org/2000/svg" class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8"></circle>
+            <path d="m21 21-4.3-4.3"></path>
+          </svg>
+          <input type="text" id="search-input" placeholder="Enter IP Address or Domain (e.g. 8.8.8.8, github.com)..." autocomplete="off" spellcheck="false">
+          <button type="button" id="locate-me-btn" title="Locate My IP" class="action-btn">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 22s-8-4.5-8-11.8A8 8 0 0 1 12 2a8 8 0 0 1 8 8.2c0 7.3-8 11.8-8 11.8z"></path>
+              <circle cx="12" cy="10" r="3"></circle>
+            </svg>
+          </button>
+        </div>
+        <button type="submit" class="submit-btn">Track</button>
+      </form>
+    </section>
+
+    <!-- Details Display -->
+    <section id="details-section" class="details-section">
+      <!-- Loading Indicator -->
+      <div class="loading-overlay">
+        <div class="spinner"></div>
+        <p>Scanning Coordinates...</p>
+      </div>
+
+      <!-- Content -->
+      <div class="details-grid">
+        
+        <!-- IP Address Header -->
+        <div class="detail-card span-full ip-header-card">
+          <div class="ip-meta">
+            <span class="label">TARGET IP ADDRESS</span>
+            <h2 id="ip-display" class="value ip-text">0.0.0.0</h2>
+          </div>
+          <button type="button" id="copy-ip-btn" class="copy-btn" title="Copy IP Address">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect>
+              <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path>
+            </svg>
+          </button>
+        </div>
+
+        <!-- Location Details -->
+        <div class="detail-card span-full location-card">
+          <div class="flag-container">
+            <img id="country-flag" src="https://flagcdn.com/w40/un.png" alt="Country Flag">
+          </div>
+          <div class="loc-details">
+            <div class="loc-header">
+              <span class="label">GEOGRAPHIC LOCATION</span>
+              <span id="location-source-badge" class="source-badge ip-badge">IP ESTIMATE</span>
+            </div>
+            <div id="location-display" class="value highlight-text">Loading location...</div>
+            <div id="postal-display" class="sub-value">Postal Code: --</div>
+          </div>
+        </div>
+
+        <!-- Coordinates -->
+        <div class="detail-card">
+          <span class="label">COORDINATES</span>
+          <div id="coords-display" class="value">00.0000°, 00.0000°</div>
+          <button type="button" id="fly-to-btn" class="fly-to-link">
+            <span>Fly to View</span>
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M22 2 11 13"></path>
+              <path d="m22 2-7 20-4-9-9-4Z"></path>
+            </svg>
+          </button>
+        </div>
+
+        <!-- ISP & Network -->
+        <div class="detail-card">
+          <span class="label">ISP &amp; NETWORK</span>
+          <div id="isp-display" class="value text-truncate">Loading ISP...</div>
+          <div id="asn-display" class="sub-value text-truncate">ASN: --</div>
+        </div>
+
+        <!-- Timezone -->
+        <div class="detail-card">
+          <span class="label">TIMEZONE</span>
+          <div id="timezone-display" class="value">UTC+00:00</div>
+          <div id="localtime-display" class="sub-value">Local Time: --:--</div>
+        </div>
+
+        <!-- Organization -->
+        <div class="detail-card">
+          <span class="label">ORGANIZATION</span>
+          <div id="org-display" class="value text-truncate">Loading Org...</div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- Map Theme Switcher -->
+    <footer class="panel-footer">
+      <div class="layer-control-title">MAP LAYER STYLE</div>
+      <div class="layer-buttons">
+        <button type="button" id="layer-satellite-btn" class="layer-btn" data-layer="satellite">
+          <span class="btn-dot"></span>
+          <span>Satellite</span>
+        </button>
+        <button type="button" id="layer-hybrid-btn" class="layer-btn active" data-layer="hybrid">
+          <span class="btn-dot"></span>
+          <span>Hybrid</span>
+        </button>
+        <button type="button" id="layer-street-btn" class="layer-btn" data-layer="street">
+          <span class="btn-dot"></span>
+          <span>Street Map</span>
+        </button>
+      </div>
+    </footer>
+  </main>
+
+  <!-- Google Maps API Key Settings Modal -->
+  <div id="settings-modal" class="modal-overlay">
+    <div class="modal-content glassmorphism">
+      <div class="modal-header">
+        <h3>Google Maps API Config</h3>
+        <button type="button" id="close-modal-btn" class="close-modal-btn">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-desc">Enter your Google Maps API Key below to remove watermarks and enable full satellite features. The key is saved locally in your browser.</p>
+        <div class="input-group">
+          <label for="api-key-input">Google Maps API Key</label>
+          <input type="text" id="api-key-input" placeholder="AIzaSy..." autocomplete="off" spellcheck="false">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" id="reset-key-btn" class="modal-btn secondary-btn">Clear Key</button>
+        <button type="button" id="save-key-btn" class="modal-btn primary-btn">Save &amp; Reload</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Error Toast -->
+  <div id="error-toast" class="error-toast">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="10"></circle>
+      <line x1="12" x2="12" y1="8" y2="12"></line>
+      <line x1="12" x2="12.01" y1="16" y2="16"></line>
+    </svg>
+    <span id="error-message">Failed to retrieve location details.</span>
+  </div>
+
+  <!-- Application Script -->
+  <script src="app.js"></script>
+</body>
+</html>
