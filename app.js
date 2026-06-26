@@ -7,10 +7,10 @@ let targetMarker = null; // MapLibre Marker for tracked target
 let userGPSMarker = null; // MapLibre Marker for device GPS pulsing blue dot
 let currentCoords = [20, 0]; // Active focused coordinates [lat, lon]
 let userGPSCoords = null; // Cached GPS coordinates [lat, lon]
-let activeLayerKey = 'hybrid'; // Style: 'satellite', 'hybrid', 'street'
-
-// Queuing states (MapLibre style loading is async)
+let activeLayerKey = 'hybrid'; // Default style key
 let mapStyleLoaded = false;
+
+// Queuing states (MapLibre loading is async)
 let queuedGPSCoords = null;
 let queuedTargetCoords = null;
 let queuedTargetLabel = '';
@@ -43,73 +43,141 @@ const layerHybridBtn = document.getElementById('layer-hybrid-btn');
 const layerStreetBtn = document.getElementById('layer-street-btn');
 
 // ==========================================
+// INLINE MAP STYLE DEFINITIONS
+// ==========================================
+// Self-contained style objects bypass external sprite/font CORS issues & ad-blockers.
+const mapStyles = {
+  satellite: {
+    version: 8,
+    sources: {
+      'esri-satellite': {
+        type: 'raster',
+        tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
+        tileSize: 256,
+        attribution: 'Tiles &copy; Esri'
+      }
+    },
+    layers: [
+      {
+        id: 'satellite',
+        type: 'raster',
+        source: 'esri-satellite'
+      }
+    ]
+  },
+  hybrid: {
+    version: 8,
+    sources: {
+      'esri-satellite': {
+        type: 'raster',
+        tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
+        tileSize: 256,
+        attribution: 'Tiles &copy; Esri'
+      },
+      'cartodb-labels': {
+        type: 'raster',
+        tiles: [
+          'https://a.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}.png',
+          'https://b.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}.png',
+          'https://c.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}.png'
+        ],
+        tileSize: 256,
+        attribution: '&copy; CartoDB / OSM'
+      }
+    },
+    layers: [
+      {
+        id: 'satellite',
+        type: 'raster',
+        source: 'esri-satellite'
+      },
+      {
+        id: 'labels',
+        type: 'raster',
+        source: 'cartodb-labels'
+      }
+    ]
+  },
+  street: {
+    version: 8,
+    sources: {
+      'osm-streets': {
+        type: 'raster',
+        tiles: [
+          'https://a.tile.openstreetmap.org/{z}/{x}/{y}.png',
+          'https://b.tile.openstreetmap.org/{z}/{x}/{y}.png',
+          'https://c.tile.openstreetmap.org/{z}/{x}/{y}.png'
+        ],
+        tileSize: 256,
+        attribution: '&copy; OpenStreetMap'
+      }
+    },
+    layers: [
+      {
+        id: 'streets',
+        type: 'raster',
+        source: 'osm-streets'
+      }
+    ]
+  }
+};
+
+// ==========================================
 // MAP INITIALIZATION
 // ==========================================
 
 function initMap() {
-  // Initialize MapLibre Map with OpenFreeMap Dark style
-  map = new maplibregl.Map({
-    container: 'map',
-    style: 'https://tiles.openfreemap.org/styles/dark', // Dark base theme
-    center: [0, 20], // starting position [lng, lat]
-    zoom: 2.5,
-    minZoom: 2,
-    maxZoom: 19,
-    maxBounds: [[-180, -85], [180, 85]], // Prevent vertical whitespace polar panning
-    attributionControl: false // Custom styled attribution
-  });
-
-  // Add navigation controls (Zoom, Compass) in top-right
-  map.addControl(new maplibregl.NavigationControl({ showCompass: true }), 'top-right');
-  map.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-right');
-
-  // Load additional layers once style has loaded
-  map.on('load', () => {
-    // 1. Add Esri Satellite Raster Source
-    map.addSource('esri-satellite', {
-      type: 'raster',
-      tiles: [
-        'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
-      ],
-      tileSize: 256,
-      attribution: 'Tiles &copy; Esri'
+  try {
+    // Initialize MapLibre Map with Hybrid style object directly
+    map = new maplibregl.Map({
+      container: 'map',
+      style: mapStyles[activeLayerKey],
+      center: [0, 20], // starting position [lng, lat]
+      zoom: 2.5,
+      minZoom: 2,
+      maxZoom: 19,
+      maxBounds: [[-180, -85], [180, 85]], // Prevent vertical polar whitespace panning
+      attributionControl: false
     });
 
-    // 2. Locate label layers so we can insert satellite layer UNDERNEATH the labels
-    const layers = map.getStyle().layers;
-    let firstLabelId = '';
-    
-    for (const layer of layers) {
-      if (layer.id.includes('label') || layer.id.includes('place') || layer.id.includes('poi') || (layer.layout && layer.layout['text-field'])) {
-        firstLabelId = layer.id;
-        break;
-      }
-    }
+    // Add navigation controls (Zoom, Compass) in top-right
+    map.addControl(new maplibregl.NavigationControl({ showCompass: true }), 'top-right');
+    map.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-right');
 
-    // 3. Add Satellite Layer under text labels (Hybrid view default)
-    map.addLayer({
-      id: 'satellite-layer',
-      type: 'raster',
-      source: 'esri-satellite',
-      layout: {
-        visibility: 'visible' // default Hybrid is visible
-      }
-    }, firstLabelId);
+    // Load additional layers once style has loaded
+    map.on('load', () => {
+      mapStyleLoaded = true;
+      flushQueuedActions();
+    });
 
-    mapStyleLoaded = true;
+    // Error logging to dashboard to make errors user-debuggable
+    map.on('error', (e) => {
+      console.error('MapLibre rendering error:', e);
+      showError(`Map Render Error: ${e.error ? (e.error.message || e.error) : 'Tile loading failed'}`);
+    });
 
-    // Flush queued actions
-    if (queuedGPSCoords) {
-      updateUserGPSMarker(queuedGPSCoords[0], queuedGPSCoords[1]);
-    }
-    if (queuedTargetCoords) {
-      updateTargetMarker(queuedTargetCoords[0], queuedTargetCoords[1], queuedTargetLabel, queuedTargetShouldCenter);
-    }
-  });
+    window.addEventListener('error', (e) => {
+      console.error('JavaScript error:', e);
+      showError(`JS Error: ${e.message}`);
+    });
+
+  } catch (error) {
+    console.error('Map initialization failed:', error);
+    showError(`Map Init Failed: ${error.message}`);
+  }
 
   // Acquire GPS and fetch IP details
   acquireGPSLocation(true);
   fetchGeoIP('', false);
+}
+
+function flushQueuedActions() {
+  if (queuedGPSCoords) {
+    updateUserGPSMarker(queuedGPSCoords[0], queuedGPSCoords[1]);
+  }
+  if (queuedTargetCoords) {
+    updateTargetMarker(queuedTargetCoords[0], queuedTargetCoords[1], queuedTargetLabel, queuedTargetShouldCenter);
+  }
 }
 
 // ==========================================
@@ -122,7 +190,7 @@ function showError(message) {
   
   setTimeout(() => {
     errorToast.classList.remove('show');
-  }, 5000);
+  }, 6000);
 }
 
 function isDomain(input) {
@@ -211,7 +279,6 @@ function updateUserGPSMarker(lat, lon) {
   if (userGPSMarker) {
     userGPSMarker.setLngLat(lngLat);
   } else {
-    // Create elements dynamically
     const el = document.createElement('div');
     el.className = 'blue-dot-marker';
     el.innerHTML = '<div class="blue-dot-pulse"></div><div class="blue-dot-core"></div>';
@@ -422,7 +489,6 @@ function updateTargetMarker(lat, lon, label, shouldCenter = true) {
 
 function flyToLocation(zoomLevel = 14) {
   if (!map) return;
-  // MapLibre centers on [lng, lat]
   map.flyTo({
     center: [currentCoords[1], currentCoords[0]],
     zoom: zoomLevel,
@@ -436,41 +502,12 @@ function flyToLocation(zoomLevel = 14) {
 // ==========================================
 
 function switchLayer(layerKey) {
-  if (!map || !mapStyleLoaded) return;
+  if (!map) return;
 
   activeLayerKey = layerKey;
   
-  if (layerKey === 'satellite') {
-    // Pure Satellite: Show Esri imagery, hide vector labels/roads
-    map.setLayoutProperty('satellite-layer', 'visibility', 'visible');
-    
-    map.getStyle().layers.forEach(layer => {
-      if (layer.id === 'satellite-layer') return;
-      if (layer.type === 'symbol') {
-        map.setLayoutProperty(layer.id, 'visibility', 'none');
-      }
-    });
-  } else if (layerKey === 'hybrid') {
-    // Hybrid: Show Esri imagery, show vector labels
-    map.setLayoutProperty('satellite-layer', 'visibility', 'visible');
-    
-    map.getStyle().layers.forEach(layer => {
-      if (layer.id === 'satellite-layer') return;
-      if (layer.type === 'symbol') {
-        map.setLayoutProperty(layer.id, 'visibility', 'visible');
-      }
-    });
-  } else {
-    // Street Map: Hide Esri imagery, show vector labels (which displays base dark style)
-    map.setLayoutProperty('satellite-layer', 'visibility', 'none');
-    
-    map.getStyle().layers.forEach(layer => {
-      if (layer.id === 'satellite-layer') return;
-      if (layer.type === 'symbol') {
-        map.setLayoutProperty(layer.id, 'visibility', 'visible');
-      }
-    });
-  }
+  // Directly swap the self-contained style object!
+  map.setStyle(mapStyles[layerKey]);
 
   [layerSatelliteBtn, layerHybridBtn, layerStreetBtn].forEach(btn => {
     btn.classList.remove('active');
