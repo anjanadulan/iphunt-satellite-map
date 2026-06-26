@@ -2,13 +2,19 @@
 // CONFIGURATION & INITIAL STATE
 // ==========================================
 
-let map;
-let targetMarker = null; // Custom HTMLMarker for searched target
-let userGPSMarker = null; // Custom HTMLMarker for device GPS blue dot
-let currentCoords = [20, 0]; // Currently focused [lat, lon]
-let userGPSCoords = null; // Cached GPS coordinates
-let activeLayerKey = 'hybrid'; // Default style
-let infoWindow = null; // Google Maps InfoWindow
+let map = null;
+let targetMarker = null; // MapLibre Marker for tracked target
+let userGPSMarker = null; // MapLibre Marker for device GPS pulsing blue dot
+let currentCoords = [20, 0]; // Active focused coordinates [lat, lon]
+let userGPSCoords = null; // Cached GPS coordinates [lat, lon]
+let activeLayerKey = 'hybrid'; // Style: 'satellite', 'hybrid', 'street'
+
+// Queuing states (MapLibre style loading is async)
+let mapStyleLoaded = false;
+let queuedGPSCoords = null;
+let queuedTargetCoords = null;
+let queuedTargetLabel = '';
+let queuedTargetShouldCenter = false;
 
 // DOM Cache Elements
 const searchForm = document.getElementById('search-form');
@@ -31,149 +37,80 @@ const errorToast = document.getElementById('error-toast');
 const errorMessage = document.getElementById('error-message');
 const locationSourceBadge = document.getElementById('location-source-badge');
 
-// Modal Elements
-const settingsBtn = document.getElementById('settings-btn');
-const settingsModal = document.getElementById('settings-modal');
-const closeModalBtn = document.getElementById('close-modal-btn');
-const apiKeyInput = document.getElementById('api-key-input');
-const saveKeyBtn = document.getElementById('save-key-btn');
-const resetKeyBtn = document.getElementById('reset-key-btn');
-
 // Layer buttons
 const layerSatelliteBtn = document.getElementById('layer-satellite-btn');
 const layerHybridBtn = document.getElementById('layer-hybrid-btn');
 const layerStreetBtn = document.getElementById('layer-street-btn');
 
 // ==========================================
-// DYNAMIC GOOGLE MAPS LOADER
-// ==========================================
-
-function loadGoogleMapsAPI() {
-  const savedKey = localStorage.getItem('gmaps_api_key') || '';
-  apiKeyInput.value = savedKey;
-  
-  // Inject Google Maps script dynamically
-  const script = document.createElement('script');
-  script.src = `https://maps.googleapis.com/maps/api/js?key=${savedKey}&callback=initMap`;
-  script.async = true;
-  script.defer = true;
-  
-  script.onerror = () => {
-    showError('Failed to load Google Maps script. Check your internet connection.');
-  };
-  
-  document.head.appendChild(script);
-}
-
-// ==========================================
-// CUSTOM HTMLMARKER OVERLAY
-// ==========================================
-
-let HTMLMarker;
-
-function defineCustomHTMLMarkerClass() {
-  // We define it inside a function so google.maps namespace is ready
-  HTMLMarker = class extends google.maps.OverlayView {
-    constructor(latlng, html, className) {
-      super();
-      this.latlng = new google.maps.LatLng(latlng[0], latlng[1]);
-      this.html = html;
-      this.className = className;
-      this.div = null;
-    }
-
-    onAdd() {
-      this.div = document.createElement('div');
-      this.div.className = this.className;
-      this.div.innerHTML = this.html;
-      this.div.style.position = 'absolute';
-      this.div.style.cursor = 'pointer';
-
-      // Click event
-      this.div.addEventListener('click', () => {
-        if (this.onClick) this.onClick();
-      });
-
-      const panes = this.getPanes();
-      panes.overlayMouseTarget.appendChild(this.div);
-    }
-
-    draw() {
-      if (!this.div) return;
-      const projection = this.getProjection();
-      if (!projection) return;
-
-      const position = projection.fromLatLngToDivPixel(this.latlng);
-      if (position) {
-        this.div.style.left = position.x + 'px';
-        this.div.style.top = position.y + 'px';
-      }
-    }
-
-    onRemove() {
-      if (this.div) {
-        this.div.parentNode.removeChild(this.div);
-        this.div = null;
-      }
-    }
-
-    setLatLng(latlng) {
-      this.latlng = new google.maps.LatLng(latlng[0], latlng[1]);
-      this.draw();
-    }
-  };
-}
-
-// ==========================================
 // MAP INITIALIZATION
 // ==========================================
 
-window.initMap = function() {
-  // Define custom marker class once google namespace exists
-  defineCustomHTMLMarkerClass();
-
-  // Create InfoWindow once
-  infoWindow = new google.maps.InfoWindow({
-    pixelOffset: new google.maps.Size(0, -10)
-  });
-
-  const defaultCenter = new google.maps.LatLng(20, 0);
-  
-  // Initialize Google Map with bounds restrictions to prevent grey/whitespace panning
-  map = new google.maps.Map(document.getElementById('map'), {
-    center: defaultCenter,
+function initMap() {
+  // Initialize MapLibre Map with OpenFreeMap Dark style
+  map = new maplibregl.Map({
+    container: 'map',
+    style: 'https://tiles.openfreemap.org/styles/dark', // Dark base theme
+    center: [0, 20], // starting position [lng, lat]
     zoom: 2.5,
-    minZoom: 2, // Prevent zooming out into infinite grey space
-    mapTypeId: 'hybrid', // default satellite hybrid view
-    disableDefaultUI: true, // cleaner glassmorphic UI overlay
-    zoomControl: true,
-    zoomControlOptions: {
-      position: google.maps.ControlPosition.RIGHT_TOP
-    },
-    restriction: {
-      latLngBounds: {
-        north: 85,
-        south: -85,
-        west: -180,
-        east: 180
-      },
-      strictBounds: true
-    },
-    styles: [
-      {
-        featureType: "all",
-        elementType: "labels.text.fill",
-        textColor: "#ffffff"
-      }
-    ]
+    minZoom: 2,
+    maxZoom: 19,
+    maxBounds: [[-180, -85], [180, 85]], // Prevent vertical whitespace polar panning
+    attributionControl: false // Custom styled attribution
   });
 
-  // 1. Try to acquire exact device GPS location
+  // Add navigation controls (Zoom, Compass) in top-right
+  map.addControl(new maplibregl.NavigationControl({ showCompass: true }), 'top-right');
+  map.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-right');
+
+  // Load additional layers once style has loaded
+  map.on('style.load', () => {
+    // 1. Add Esri Satellite Raster Source
+    map.addSource('esri-satellite', {
+      type: 'raster',
+      tiles: [
+        'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
+      ],
+      tileSize: 256,
+      attribution: 'Tiles &copy; Esri'
+    });
+
+    // 2. Locate label layers so we can insert satellite layer UNDERNEATH the labels
+    const layers = map.getStyle().layers;
+    let firstLabelId = '';
+    
+    for (const layer of layers) {
+      if (layer.id.includes('label') || layer.id.includes('place') || layer.id.includes('poi') || (layer.layout && layer.layout['text-field'])) {
+        firstLabelId = layer.id;
+        break;
+      }
+    }
+
+    // 3. Add Satellite Layer under text labels (Hybrid view default)
+    map.addLayer({
+      id: 'satellite-layer',
+      type: 'raster',
+      source: 'esri-satellite',
+      layout: {
+        visibility: 'visible' // default Hybrid is visible
+      }
+    }, firstLabelId);
+
+    mapStyleLoaded = true;
+
+    // Flush queued actions
+    if (queuedGPSCoords) {
+      updateUserGPSMarker(queuedGPSCoords[0], queuedGPSCoords[1]);
+    }
+    if (queuedTargetCoords) {
+      updateTargetMarker(queuedTargetCoords[0], queuedTargetCoords[1], queuedTargetLabel, queuedTargetShouldCenter);
+    }
+  });
+
+  // Acquire GPS and fetch IP details
   acquireGPSLocation(true);
-  
-  // 2. Fetch IP details in parallel
   fetchGeoIP('', false);
-};
+}
 
 // ==========================================
 // UTILITY FUNCTIONS
@@ -262,24 +199,35 @@ function acquireGPSLocation(shouldCenter = true) {
 }
 
 function updateUserGPSMarker(lat, lon) {
-  if (!map || !HTMLMarker) return;
+  if (!map) return;
+  
+  if (!mapStyleLoaded) {
+    queuedGPSCoords = [lat, lon];
+    return;
+  }
+
+  const lngLat = [lon, lat]; // MapLibre uses [lng, lat]
 
   if (userGPSMarker) {
-    userGPSMarker.setLatLng([lat, lon]);
+    userGPSMarker.setLngLat(lngLat);
   } else {
-    userGPSMarker = new HTMLMarker([lat, lon], '<div class="blue-dot-pulse"></div><div class="blue-dot-core"></div>', 'blue-dot-marker');
-    userGPSMarker.setMap(map);
-    
-    userGPSMarker.onClick = () => {
-      infoWindow.setContent(`
-        <div style="font-family: var(--font-family); color: #fff; font-size:12px; font-weight:600; padding:2px;">
-          <div style="color: #962c41; font-size:9px; letter-spacing:0.5px; text-transform:uppercase;">Your Exact Location</div>
-          <div style="margin-top:4px;">Accuracy verified via browser GPS/Wi-Fi</div>
+    // Create elements dynamically
+    const el = document.createElement('div');
+    el.className = 'blue-dot-marker';
+    el.innerHTML = '<div class="blue-dot-pulse"></div><div class="blue-dot-core"></div>';
+
+    const popup = new maplibregl.Popup({ offset: 15, closeButton: false })
+      .setHTML(`
+        <div style="font-family: var(--font-family); color: #D9D9D9; font-size:12px; font-weight:600; padding:2px;">
+          <div style="color: #962c41; font-size:9px; letter-spacing:0.5px; text-transform:uppercase; margin-bottom:2px;">Your Exact Location</div>
+          <div>Accuracy verified via browser GPS/Wi-Fi</div>
         </div>
       `);
-      infoWindow.setPosition(new google.maps.LatLng(lat, lon));
-      infoWindow.open(map);
-    };
+
+    userGPSMarker = new maplibregl.Marker({ element: el })
+      .setLngLat(lngLat)
+      .setPopup(popup)
+      .addTo(map);
   }
 }
 
@@ -433,46 +381,54 @@ function updateUI(data, isManualSearch = false) {
 }
 
 function updateTargetMarker(lat, lon, label, shouldCenter = true) {
-  if (!map || !HTMLMarker) return;
+  if (!map) return;
   
-  if (targetMarker) {
-    targetMarker.setLatLng([lat, lon]);
-  } else {
-    targetMarker = new HTMLMarker([lat, lon], '<div class="marker-pulse"></div><div class="marker-dot"></div>', 'custom-gps-marker');
-    targetMarker.setMap(map);
-    
-    targetMarker.onClick = () => {
-      infoWindow.setContent(`
-        <div style="font-family: var(--font-family); color: #fff; font-size:12px; font-weight:600; padding:2px;">
-          <div style="color: var(--text-secondary); font-size:9px; letter-spacing:0.5px; text-transform:uppercase;">Tracked IP Target</div>
-          <div style="margin-top:4px; font-size: 13px; color: var(--accent-color);">${label}</div>
-        </div>
-      `);
-      infoWindow.setPosition(new google.maps.LatLng(lat, lon));
-      infoWindow.open(map);
-    };
+  if (!mapStyleLoaded) {
+    queuedTargetCoords = [lat, lon];
+    queuedTargetLabel = label;
+    queuedTargetShouldCenter = shouldCenter;
+    return;
   }
 
-  if (shouldCenter) {
-    infoWindow.setContent(`
-      <div style="font-family: var(--font-family); color: #fff; font-size:12px; font-weight:600; padding:2px;">
-        <div style="color: var(--text-secondary); font-size:9px; letter-spacing:0.5px; text-transform:uppercase;">Tracked IP Target</div>
-        <div style="margin-top:4px; font-size: 13px; color: var(--accent-color);">${label}</div>
+  const lngLat = [lon, lat];
+
+  if (targetMarker) {
+    targetMarker.setLngLat(lngLat);
+  } else {
+    const el = document.createElement('div');
+    el.className = 'custom-gps-marker';
+    el.innerHTML = '<div class="marker-pulse"></div><div class="marker-dot"></div>';
+    
+    targetMarker = new maplibregl.Marker({ element: el })
+      .setLngLat(lngLat)
+      .addTo(map);
+  }
+  
+  const popup = new maplibregl.Popup({ offset: 15, closeButton: false })
+    .setHTML(`
+      <div style="font-family: var(--font-family); color: #D9D9D9; font-size:12px; font-weight:600; padding:2px;">
+        <div style="color: var(--text-secondary); font-size:9px; letter-spacing:0.5px; text-transform:uppercase; margin-bottom:2px;">Tracked IP Target</div>
+        <div style="font-size: 13px; color: #962c41;">${label}</div>
       </div>
     `);
-    infoWindow.setPosition(new google.maps.LatLng(lat, lon));
-    infoWindow.open(map);
-    
+
+  targetMarker.setPopup(popup);
+
+  if (shouldCenter) {
+    targetMarker.togglePopup(); // Open the popup automatically
     flyToLocation(14); // Zoom 14 for IP search
   }
 }
 
 function flyToLocation(zoomLevel = 14) {
   if (!map) return;
-  
-  const targetLatLng = new google.maps.LatLng(currentCoords[0], currentCoords[1]);
-  map.panTo(targetLatLng);
-  map.setZoom(zoomLevel);
+  // MapLibre centers on [lng, lat]
+  map.flyTo({
+    center: [currentCoords[1], currentCoords[0]],
+    zoom: zoomLevel,
+    essential: true,
+    duration: 2500
+  });
 }
 
 // ==========================================
@@ -480,16 +436,40 @@ function flyToLocation(zoomLevel = 14) {
 // ==========================================
 
 function switchLayer(layerKey) {
-  if (!map) return;
+  if (!map || !mapStyleLoaded) return;
 
   activeLayerKey = layerKey;
   
   if (layerKey === 'satellite') {
-    map.setMapTypeId('satellite');
+    // Pure Satellite: Show Esri imagery, hide vector labels/roads
+    map.setLayoutProperty('satellite-layer', 'visibility', 'visible');
+    
+    map.getStyle().layers.forEach(layer => {
+      if (layer.id === 'satellite-layer') return;
+      if (layer.type === 'symbol') {
+        map.setLayoutProperty(layer.id, 'visibility', 'none');
+      }
+    });
   } else if (layerKey === 'hybrid') {
-    map.setMapTypeId('hybrid');
+    // Hybrid: Show Esri imagery, show vector labels
+    map.setLayoutProperty('satellite-layer', 'visibility', 'visible');
+    
+    map.getStyle().layers.forEach(layer => {
+      if (layer.id === 'satellite-layer') return;
+      if (layer.type === 'symbol') {
+        map.setLayoutProperty(layer.id, 'visibility', 'visible');
+      }
+    });
   } else {
-    map.setMapTypeId('roadmap');
+    // Street Map: Hide Esri imagery, show vector labels (which displays base dark style)
+    map.setLayoutProperty('satellite-layer', 'visibility', 'none');
+    
+    map.getStyle().layers.forEach(layer => {
+      if (layer.id === 'satellite-layer') return;
+      if (layer.type === 'symbol') {
+        map.setLayoutProperty(layer.id, 'visibility', 'visible');
+      }
+    });
   }
 
   [layerSatelliteBtn, layerHybridBtn, layerStreetBtn].forEach(btn => {
@@ -542,33 +522,6 @@ copyIpBtn.addEventListener('click', () => {
   }
 });
 
-// Settings Modal controls
-settingsBtn.addEventListener('click', () => {
-  settingsModal.classList.add('show');
-});
-
-closeModalBtn.addEventListener('click', () => {
-  settingsModal.classList.remove('show');
-});
-
-settingsModal.addEventListener('click', (e) => {
-  if (e.target === settingsModal) {
-    settingsModal.classList.remove('show');
-  }
-});
-
-saveKeyBtn.addEventListener('click', () => {
-  const key = apiKeyInput.value.trim();
-  localStorage.setItem('gmaps_api_key', key);
-  location.reload();
-});
-
-resetKeyBtn.addEventListener('click', () => {
-  localStorage.removeItem('gmaps_api_key');
-  apiKeyInput.value = '';
-  location.reload();
-});
-
 // Layer buttons click listeners
 layerSatelliteBtn.addEventListener('click', () => switchLayer('satellite'));
 layerHybridBtn.addEventListener('click', () => switchLayer('hybrid'));
@@ -579,5 +532,5 @@ layerStreetBtn.addEventListener('click', () => switchLayer('street'));
 // ==========================================
 
 window.addEventListener('DOMContentLoaded', () => {
-  loadGoogleMapsAPI();
+  initMap();
 });

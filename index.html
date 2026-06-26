@@ -3,19 +3,22 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Orbital IP Tracker &amp; Google Satellite Map</title>
+  <title>Orbital IP Tracker &amp; OpenFreeMap Satellite</title>
   
   <!-- Google Fonts - Inter -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   
+  <!-- MapLibre Map CSS -->
+  <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
+  
   <!-- Application CSS -->
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-  <!-- Fullscreen Google Map Container -->
+  <!-- Fullscreen Map Container -->
   <div id="map"></div>
 
   <!-- Glassmorphic Dashboard Panel -->
@@ -33,13 +36,6 @@
           <span>IP SATELLITE MAP</span>
         </div>
       </div>
-      <!-- API Key Settings Cog -->
-      <button type="button" id="settings-btn" class="settings-btn" title="Google Maps API Key Settings">
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.1a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path>
-          <circle cx="12" cy="12" r="3"></circle>
-        </svg>
-      </button>
     </header>
 
     <!-- Search Section -->
@@ -158,27 +154,6 @@
     </footer>
   </main>
 
-  <!-- Google Maps API Key Settings Modal -->
-  <div id="settings-modal" class="modal-overlay">
-    <div class="modal-content glassmorphism">
-      <div class="modal-header">
-        <h3>Google Maps API Config</h3>
-        <button type="button" id="close-modal-btn" class="close-modal-btn">&times;</button>
-      </div>
-      <div class="modal-body">
-        <p class="modal-desc">Enter your Google Maps API Key below to remove watermarks and enable full satellite features. The key is saved locally in your browser.</p>
-        <div class="input-group">
-          <label for="api-key-input">Google Maps API Key</label>
-          <input type="text" id="api-key-input" placeholder="AIzaSy..." autocomplete="off" spellcheck="false">
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button type="button" id="reset-key-btn" class="modal-btn secondary-btn">Clear Key</button>
-        <button type="button" id="save-key-btn" class="modal-btn primary-btn">Save &amp; Reload</button>
-      </div>
-    </div>
-  </div>
-
   <!-- Error Toast -->
   <div id="error-toast" class="error-toast">
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -189,6 +164,9 @@
     <span id="error-message">Failed to retrieve location details.</span>
   </div>
 
+  <!-- MapLibre Map JS -->
+  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+  
   <!-- Application Script -->
   <script src="app.js"></script>
 </body>
