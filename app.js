@@ -15,6 +15,7 @@ let queuedGPSCoords = null;
 let queuedTargetCoords = null;
 let queuedTargetLabel = '';
 let queuedTargetShouldCenter = false;
+let queuedFlyTo = null;
 
 // DOM Cache Elements
 const searchForm = document.getElementById('search-form');
@@ -158,6 +159,10 @@ function initMap() {
 
     window.addEventListener('error', (e) => {
       console.error('JavaScript error:', e);
+      // Ignore generic extension errors and CORS-masked third-party errors
+      if (!e.message || e.message === 'Script error.' || !e.filename || e.filename.includes('extension') || e.filename.includes('chrome')) {
+        return;
+      }
       showError(`JS Error: ${e.message}`);
     });
 
@@ -177,6 +182,15 @@ function flushQueuedActions() {
   }
   if (queuedTargetCoords) {
     updateTargetMarker(queuedTargetCoords[0], queuedTargetCoords[1], queuedTargetLabel, queuedTargetShouldCenter);
+  }
+  if (queuedFlyTo) {
+    map.flyTo({
+      center: [queuedFlyTo.coords[1], queuedFlyTo.coords[0]],
+      zoom: queuedFlyTo.zoom,
+      essential: true,
+      duration: 2500
+    });
+    queuedFlyTo = null;
   }
 }
 
@@ -489,6 +503,12 @@ function updateTargetMarker(lat, lon, label, shouldCenter = true) {
 
 function flyToLocation(zoomLevel = 14) {
   if (!map) return;
+  
+  if (!mapStyleLoaded) {
+    queuedFlyTo = { coords: [...currentCoords], zoom: zoomLevel };
+    return;
+  }
+
   map.flyTo({
     center: [currentCoords[1], currentCoords[0]],
     zoom: zoomLevel,
