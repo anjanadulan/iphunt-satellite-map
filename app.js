@@ -3,19 +3,12 @@
 // ==========================================
 
 let map = null;
-let targetMarker = null; // MapLibre Marker for tracked target
-let userGPSMarker = null; // MapLibre Marker for device GPS pulsing blue dot
+let targetMarker = null; // Leaflet Marker for tracked target
+let userGPSMarker = null; // Leaflet Marker for device GPS pulsing dot
 let currentCoords = [20, 0]; // Active focused coordinates [lat, lon]
 let userGPSCoords = null; // Cached GPS coordinates [lat, lon]
 let activeLayerKey = 'hybrid'; // Default style key
-let mapStyleLoaded = false;
-
-// Queuing states (MapLibre loading is async)
-let queuedGPSCoords = null;
-let queuedTargetCoords = null;
-let queuedTargetLabel = '';
-let queuedTargetShouldCenter = false;
-let queuedFlyTo = null;
+let currentLayer = null; // Active Leaflet tile layer/group
 
 // DOM Cache Elements
 const searchForm = document.getElementById('search-form');
@@ -44,83 +37,29 @@ const layerHybridBtn = document.getElementById('layer-hybrid-btn');
 const layerStreetBtn = document.getElementById('layer-street-btn');
 
 // ==========================================
-// INLINE MAP STYLE DEFINITIONS
+// LEAFLET MAP TILE LAYERS
 // ==========================================
-// Self-contained style objects bypass external sprite/font CORS issues & ad-blockers.
-const mapStyles = {
-  satellite: {
-    version: 8,
-    sources: {
-      'esri-satellite': {
-        type: 'raster',
-        tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
-        tileSize: 256,
-        attribution: 'Tiles &copy; Esri'
-      }
-    },
-    layers: [
-      {
-        id: 'satellite',
-        type: 'raster',
-        source: 'esri-satellite'
-      }
-    ]
-  },
-  hybrid: {
-    version: 8,
-    sources: {
-      'esri-satellite': {
-        type: 'raster',
-        tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
-        tileSize: 256,
-        attribution: 'Tiles &copy; Esri'
-      },
-      'cartodb-labels': {
-        type: 'raster',
-        tiles: [
-          'https://a.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}.png',
-          'https://b.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}.png',
-          'https://c.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}.png'
-        ],
-        tileSize: 256,
-        attribution: '&copy; CartoDB / OSM'
-      }
-    },
-    layers: [
-      {
-        id: 'satellite',
-        type: 'raster',
-        source: 'esri-satellite'
-      },
-      {
-        id: 'labels',
-        type: 'raster',
-        source: 'cartodb-labels'
-      }
-    ]
-  },
-  street: {
-    version: 8,
-    sources: {
-      'osm-streets': {
-        type: 'raster',
-        tiles: [
-          'https://a.tile.openstreetmap.org/{z}/{x}/{y}.png',
-          'https://b.tile.openstreetmap.org/{z}/{x}/{y}.png',
-          'https://c.tile.openstreetmap.org/{z}/{x}/{y}.png'
-        ],
-        tileSize: 256,
-        attribution: '&copy; OpenStreetMap'
-      }
-    },
-    layers: [
-      {
-        id: 'streets',
-        type: 'raster',
-        source: 'osm-streets'
-      }
-    ]
-  }
+const satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+  maxZoom: 19,
+  attribution: 'Tiles &copy; Esri'
+});
+
+const labelLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}.png', {
+  subdomains: 'abcd',
+  maxZoom: 20,
+  attribution: '&copy; CartoDB / OSM'
+});
+
+const streetLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  subdomains: 'abc',
+  maxZoom: 19,
+  attribution: '&copy; OpenStreetMap'
+});
+
+const tileLayers = {
+  satellite: satelliteLayer,
+  hybrid: L.layerGroup([satelliteLayer, labelLayer]),
+  street: streetLayer
 };
 
 // ==========================================
@@ -129,34 +68,28 @@ const mapStyles = {
 
 function initMap() {
   try {
-    // Initialize MapLibre Map with Hybrid style object directly
-    map = new maplibregl.Map({
-      container: 'map',
-      style: mapStyles[activeLayerKey],
-      center: [0, 20], // starting position [lng, lat]
+    // Initialize Leaflet Map
+    map = L.map('map', {
+      center: [20, 0],
       zoom: 2.5,
       minZoom: 2,
       maxZoom: 19,
-      maxBounds: [[-180, -85], [180, 85]], // Prevent vertical polar whitespace panning
+      maxBounds: [[-85, -180], [85, 180]], // Prevent vertical polar panning
+      zoomControl: false,
       attributionControl: false
     });
 
-    // Add navigation controls (Zoom, Compass) in top-right
-    map.addControl(new maplibregl.NavigationControl({ showCompass: true }), 'top-right');
-    map.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-right');
+    // Add navigation controls (Zoom) in top-right
+    L.control.zoom({ position: 'topright' }).addTo(map);
+    
+    // Add attribution control in bottom-right
+    L.control.attribution({ position: 'bottomright', prefix: false }).addTo(map);
 
-    // Load additional layers once style has loaded
-    map.on('load', () => {
-      mapStyleLoaded = true;
-      flushQueuedActions();
-    });
+    // Load default layer
+    currentLayer = tileLayers[activeLayerKey];
+    currentLayer.addTo(map);
 
-    // Error logging to dashboard to make errors user-debuggable
-    map.on('error', (e) => {
-      console.error('MapLibre rendering error:', e);
-      showError(`Map Render Error: ${e.error ? (e.error.message || e.error) : 'Tile loading failed'}`);
-    });
-
+    // Filter and catch global window errors
     window.addEventListener('error', (e) => {
       console.error('JavaScript error:', e);
       // Ignore generic extension errors and CORS-masked third-party errors
@@ -174,24 +107,6 @@ function initMap() {
   // Acquire GPS and fetch IP details
   acquireGPSLocation(true);
   fetchGeoIP('', false);
-}
-
-function flushQueuedActions() {
-  if (queuedGPSCoords) {
-    updateUserGPSMarker(queuedGPSCoords[0], queuedGPSCoords[1]);
-  }
-  if (queuedTargetCoords) {
-    updateTargetMarker(queuedTargetCoords[0], queuedTargetCoords[1], queuedTargetLabel, queuedTargetShouldCenter);
-  }
-  if (queuedFlyTo) {
-    map.flyTo({
-      center: [queuedFlyTo.coords[1], queuedFlyTo.coords[0]],
-      zoom: queuedFlyTo.zoom,
-      essential: true,
-      duration: 2500
-    });
-    queuedFlyTo = null;
-  }
 }
 
 // ==========================================
@@ -283,31 +198,27 @@ function acquireGPSLocation(shouldCenter = true) {
 function updateUserGPSMarker(lat, lon) {
   if (!map) return;
   
-  if (!mapStyleLoaded) {
-    queuedGPSCoords = [lat, lon];
-    return;
-  }
-
-  const lngLat = [lon, lat]; // MapLibre uses [lng, lat]
+  const latLng = [lat, lon];
 
   if (userGPSMarker) {
-    userGPSMarker.setLngLat(lngLat);
+    userGPSMarker.setLatLng(latLng);
   } else {
-    const el = document.createElement('div');
-    el.className = 'blue-dot-marker';
-    el.innerHTML = '<div class="blue-dot-pulse"></div><div class="blue-dot-core"></div>';
+    const gpsIcon = L.divIcon({
+      className: 'blue-dot-marker',
+      html: '<div class="blue-dot-pulse"></div><div class="blue-dot-core"></div>',
+      iconSize: [20, 20],
+      iconAnchor: [10, 10]
+    });
 
-    const popup = new maplibregl.Popup({ offset: 15, closeButton: false })
-      .setHTML(`
-        <div style="font-family: var(--font-family); color: #D9D9D9; font-size:12px; font-weight:600; padding:2px;">
-          <div style="color: #962c41; font-size:9px; letter-spacing:0.5px; text-transform:uppercase; margin-bottom:2px;">Your Exact Location</div>
-          <div>Accuracy verified via browser GPS/Wi-Fi</div>
-        </div>
-      `);
+    const popupContent = `
+      <div style="font-family: var(--font-family); color: #D9D9D9; font-size:12px; font-weight:600; padding:2px;">
+        <div style="color: #962c41; font-size:9px; letter-spacing:0.5px; text-transform:uppercase; margin-bottom:2px;">Your Exact Location</div>
+        <div>Accuracy verified via browser GPS/Wi-Fi</div>
+      </div>
+    `;
 
-    userGPSMarker = new maplibregl.Marker({ element: el })
-      .setLngLat(lngLat)
-      .setPopup(popup)
+    userGPSMarker = L.marker(latLng, { icon: gpsIcon })
+      .bindPopup(popupContent, { offset: [0, -5], closeButton: false })
       .addTo(map);
   }
 }
@@ -464,56 +375,41 @@ function updateUI(data, isManualSearch = false) {
 function updateTargetMarker(lat, lon, label, shouldCenter = true) {
   if (!map) return;
   
-  if (!mapStyleLoaded) {
-    queuedTargetCoords = [lat, lon];
-    queuedTargetLabel = label;
-    queuedTargetShouldCenter = shouldCenter;
-    return;
-  }
-
-  const lngLat = [lon, lat];
+  const latLng = [lat, lon];
 
   if (targetMarker) {
-    targetMarker.setLngLat(lngLat);
+    targetMarker.setLatLng(latLng);
   } else {
-    const el = document.createElement('div');
-    el.className = 'custom-gps-marker';
-    el.innerHTML = '<div class="marker-pulse"></div><div class="marker-dot"></div>';
+    const targetIcon = L.divIcon({
+      className: 'custom-gps-marker',
+      html: '<div class="marker-pulse"></div><div class="marker-dot"></div>',
+      iconSize: [30, 30],
+      iconAnchor: [15, 15]
+    });
     
-    targetMarker = new maplibregl.Marker({ element: el })
-      .setLngLat(lngLat)
-      .addTo(map);
+    targetMarker = L.marker(latLng, { icon: targetIcon }).addTo(map);
   }
   
-  const popup = new maplibregl.Popup({ offset: 15, closeButton: false })
-    .setHTML(`
-      <div style="font-family: var(--font-family); color: #D9D9D9; font-size:12px; font-weight:600; padding:2px;">
-        <div style="color: var(--text-secondary); font-size:9px; letter-spacing:0.5px; text-transform:uppercase; margin-bottom:2px;">Tracked IP Target</div>
-        <div style="font-size: 13px; color: #962c41;">${label}</div>
-      </div>
-    `);
+  const popupContent = `
+    <div style="font-family: var(--font-family); color: #D9D9D9; font-size:12px; font-weight:600; padding:2px;">
+      <div style="color: var(--text-secondary); font-size:9px; letter-spacing:0.5px; text-transform:uppercase; margin-bottom:2px;">Tracked IP Target</div>
+      <div style="font-size: 13px; color: #962c41;">${label}</div>
+    </div>
+  `;
 
-  targetMarker.setPopup(popup);
+  targetMarker.bindPopup(popupContent, { offset: [0, -10], closeButton: false });
 
   if (shouldCenter) {
-    targetMarker.togglePopup(); // Open the popup automatically
+    targetMarker.openPopup(); // Open the popup automatically
     flyToLocation(14); // Zoom 14 for IP search
   }
 }
 
 function flyToLocation(zoomLevel = 14) {
   if (!map) return;
-  
-  if (!mapStyleLoaded) {
-    queuedFlyTo = { coords: [...currentCoords], zoom: zoomLevel };
-    return;
-  }
-
-  map.flyTo({
-    center: [currentCoords[1], currentCoords[0]],
-    zoom: zoomLevel,
-    essential: true,
-    duration: 2500
+  map.flyTo(currentCoords, zoomLevel, {
+    animate: true,
+    duration: 2.5
   });
 }
 
@@ -526,8 +422,12 @@ function switchLayer(layerKey) {
 
   activeLayerKey = layerKey;
   
-  // Directly swap the self-contained style object!
-  map.setStyle(mapStyles[layerKey]);
+  if (currentLayer) {
+    map.removeLayer(currentLayer);
+  }
+
+  currentLayer = tileLayers[layerKey];
+  currentLayer.addTo(map);
 
   [layerSatelliteBtn, layerHybridBtn, layerStreetBtn].forEach(btn => {
     btn.classList.remove('active');
